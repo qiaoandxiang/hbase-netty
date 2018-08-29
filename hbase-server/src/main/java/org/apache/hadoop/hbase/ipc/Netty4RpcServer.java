@@ -830,6 +830,11 @@ public class Netty4RpcServer implements RpcServerInterface,
         }
         Message header = headerBuilder.build();
 
+        // SHX: TODO we can save all these allocation and copies, directly get one from
+        // Unpool and copy the content in there.
+        // for the first three bytebuffers, the sizes are known. so they can be written into
+        // final ByteBuf directly.
+
         // Organize the response as a set of bytebuffers rather than
         // collect it all together inside
         // one big byte array; save on allocations.
