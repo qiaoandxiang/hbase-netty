@@ -25,7 +25,6 @@ import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
-import org.apache.hadoop.hbase.ipc.RpcServer.Call;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -45,7 +44,7 @@ import com.google.protobuf.Message;
 public class CallRunner {
   private static final Log LOG = LogFactory.getLog(CallRunner.class);
 
-  private Call call;
+  private ServerCall call;
   private RpcServerInterface rpcServer;
   private MonitoredRPCHandler status;
   private volatile boolean sucessful;
@@ -56,14 +55,14 @@ public class CallRunner {
    * time we occupy heap.
    */
   // The constructor is shutdown so only RpcServer in this class can make one of these.
-  CallRunner(final RpcServerInterface rpcServer, final Call call) {
+  CallRunner(final RpcServerInterface rpcServer, final ServerCall call) {
     this.call = call;
     this.rpcServer = rpcServer;
     // Add size of the call to queue size.
     this.rpcServer.addCallSize(call.getSize());
   }
 
-  public Call getCall() {
+  public ServerCall getCall() {
     return call;
   }
 
@@ -81,16 +80,16 @@ public class CallRunner {
 
   public void run() {
     try {
-      if (!call.connection.channel.isOpen()) {
+      if (!call.isConnectionOpen()) {
         if (RpcServer.LOG.isDebugEnabled()) {
           RpcServer.LOG.debug(Thread.currentThread().getName() + ": skipped " + call);
         }
         return;
       }
       this.status.setStatus("Setting up call");
-      this.status.setConnection(call.connection.getHostAddress(), call.connection.getRemotePort());
+      this.status.setConnection(call.getHostAddress(), call.getRemotePort());
       if (RpcServer.LOG.isTraceEnabled()) {
-        UserGroupInformation remoteUser = call.connection.ugi;
+        UserGroupInformation remoteUser = call.getUser();
         RpcServer.LOG.trace(call.toShortString() + " executing as " +
             ((remoteUser == null) ? "NULL principal" : remoteUser.getUserName()));
       }
@@ -105,12 +104,13 @@ public class CallRunner {
           throw new ServerNotRunningYetException("Server " +
               (address != null ? address : "(channel closed)") + " is not running yet");
         }
-        if (call.tinfo != null) {
-          traceScope = Trace.startSpan(call.toTraceString(), call.tinfo);
+        if (call.getTinfo() != null) {
+          traceScope = Trace.startSpan(call.toTraceString(), call.getTinfo());
         }
         // make the call
-        resultPair = this.rpcServer.call(call.service, call.md, call.param, call.cellScanner,
-          call.timestamp, this.status);
+        resultPair = this.rpcServer.call(call.getService(),
+            call.getMethodDescriptor(), call.getParam(), call.getCellScanner(),
+            call.getTimestamp(), this.status, call.getTimeout());
       } catch (Throwable e) {
         RpcServer.LOG.debug(Thread.currentThread().getName() + ": " + call.toShortString(), e);
         errorThrowable = e;

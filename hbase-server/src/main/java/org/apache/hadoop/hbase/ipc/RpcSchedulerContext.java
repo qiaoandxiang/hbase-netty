@@ -23,12 +23,12 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 
 @InterfaceAudience.Private
 class RpcSchedulerContext extends RpcScheduler.Context {
-  private final RpcServer rpcServer;
+  private final RpcServerInterface rpcServer;
 
   /**
    * @param rpcServer
    */
-  RpcSchedulerContext(final RpcServer rpcServer) {
+  RpcSchedulerContext(final RpcServerInterface rpcServer) {
     this.rpcServer = rpcServer;
   }
 

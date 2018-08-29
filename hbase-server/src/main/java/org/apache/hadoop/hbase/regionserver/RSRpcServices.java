@@ -83,6 +83,7 @@ import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.ipc.HBaseRPCErrorHandler;
 import org.apache.hadoop.hbase.ipc.PayloadCarryingRpcController;
 import org.apache.hadoop.hbase.ipc.PriorityFunction;
+import org.apache.hadoop.hbase.ipc.Netty4RpcServer;
 import org.apache.hadoop.hbase.ipc.QosPriority;
 import org.apache.hadoop.hbase.ipc.RpcCallContext;
 import org.apache.hadoop.hbase.ipc.RpcServer;
@@ -956,7 +957,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     // Set how many times to retry talking to another server over HConnection.
     ConnectionUtils.setServerSideHConnectionRetriesConfig(rs.conf, name, LOG);
     try {
-      rpcServer = new RpcServer(rs, name, getServices(),
+      rpcServer = new Netty4RpcServer(rs, name, getServices(),
           bindAddress, // use final bindAddress for this server.
           rs.conf,
           rpcSchedulerFactory.create(rs.conf, this, rs));

@@ -34,6 +34,7 @@ class BufferChain {
   private final ByteBuffer[] buffers;
   private int remaining = 0;
   private int bufferOffset = 0;
+  private int size;
 
   BufferChain(ByteBuffer ... buffers) {
     // Some of the incoming buffers can be null
@@ -43,6 +44,7 @@ class BufferChain {
       bbs.add(b);
       this.remaining += b.remaining();
     }
+    this.size = remaining;
     this.buffers = bbs.toArray(new ByteBuffer[bbs.size()]);
   }
 
@@ -112,5 +114,13 @@ class BufferChain {
         lastBuffer.limit(restoreLimit);
       }
     }
+  }
+
+  int size() {
+    return size;
+  }
+
+  ByteBuffer[] getBuffers() {
+    return this.buffers;
   }
 }

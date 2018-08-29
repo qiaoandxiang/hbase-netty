@@ -57,7 +57,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -65,12 +64,12 @@ import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslException;
 import javax.security.sasl.SaslServer;
 
++import org.apache.hadoop.hbase.classification.InterfaceAudience;
++import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.CallQueueTooBigException;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseIOException;
@@ -109,6 +108,7 @@ import org.apache.hadoop.hbase.security.HBaseSaslRpcServer.SaslDigestCallbackHan
 import org.apache.hadoop.hbase.security.HBaseSaslRpcServer.SaslGssCallbackHandler;
 import org.apache.hadoop.hbase.security.SaslStatus;
 import org.apache.hadoop.hbase.security.SaslUtil;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.token.AuthenticationTokenSecretManager;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -131,6 +131,7 @@ import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.util.StringUtils;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.apache.htrace.TraceInfo;
+import org.codehaus.jackson.map.ObjectMapper;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.BlockingService;
@@ -201,7 +202,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
   /** This is set to Call object before Handler invokes an RPC and ybdie
    * after the call returns.
    */
-  protected static final ThreadLocal<Call> CurCall = new ThreadLocal<Call>();
+  protected static final ThreadLocal<ServerCall> CurCall = new ThreadLocal<ServerCall>();
 
   /** Keeps MonitoredRPCHandler per handler thread. */
   static final ThreadLocal<MonitoredRPCHandler> MONITORED_RPC
@@ -295,7 +296,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
    */
   @InterfaceAudience.LimitedPrivate({HBaseInterfaceAudience.COPROC, HBaseInterfaceAudience.PHOENIX})
   @InterfaceStability.Evolving
-  public class Call implements RpcCallContext {
+  public class Call implements ServerCall {
     protected int id;                             // the client's call id
     protected BlockingService service;
     protected MethodDescriptor md;
@@ -370,7 +371,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
         " connection: " + connection.toString();
     }
 
-    protected RequestHeader getHeader() {
+    public RequestHeader getHeader() {
       return this.header;
     }
 
@@ -386,7 +387,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
      * Short string representation without param info because param itself could be huge depends on
      * the payload of a command
      */
-    String toShortString() {
+    public String toShortString() {
       String serviceName = this.connection.service != null ?
           this.connection.service.getDescriptorForType().getName() : "null";
       return "callId: " + this.id + " service: " + serviceName +
@@ -395,7 +396,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
           " connection: " + connection.toString();
     }
 
-    String toTraceString() {
+    public String toTraceString() {
       String serviceName = this.connection.service != null ?
                            this.connection.service.getDescriptorForType().getName() : "";
       String methodName = (this.md != null) ? this.md.getName() : "";
@@ -406,7 +407,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       this.response = new BufferChain(response);
     }
 
-    protected synchronized void setResponse(Object m, final CellScanner cells,
+    public synchronized void setResponse(Object m, final CellScanner cells,
         Throwable t, String errorMsg) {
       if (this.isError) return;
       if (t != null) this.isError = true;
@@ -556,6 +557,66 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     @Override
     public boolean isRetryImmediatelySupported() {
       return retryImmediatelySupported;
+    }
+
+    @Override
+    public boolean isConnectionOpen() {
+      return connection.channel.isOpen();
+    }
+
+    @Override
+    public String getHostAddress() {
+      return connection.getHostAddress();
+    }
+
+    @Override
+    public int getRemotePort() {
+      return connection.getRemotePort();
+    }
+
+    @Override
+    public InetAddress getInetAddress() {
+      return connection.socket.getInetAddress();
+    }
+
+    @Override
+    public UserGroupInformation getUser() {
+      return connection.ugi;
+    }
+
+    @Override
+    public TraceInfo getTinfo() {
+      return tinfo;
+    }
+
+    @Override
+    public BlockingService getService() {
+      return service;
+    }
+
+    @Override
+    public MethodDescriptor getMethodDescriptor() {
+      return md;
+    }
+
+    @Override
+    public Message getParam() {
+      return param;
+    }
+
+    @Override
+    public CellScanner getCellScanner() {
+      return cellScanner;
+    }
+
+    @Override
+    public long getTimestamp() {
+      return timestamp;
+    }
+
+    @Override
+    public int getTimeout() {
+      return timeout;
     }
   }
 
@@ -2577,9 +2638,9 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
    *  @return InetAddress
    */
   public static InetAddress getRemoteIp() {
-    Call call = CurCall.get();
-    if (call != null && call.connection != null && call.connection.socket != null) {
-      return call.connection.socket.getInetAddress();
+    ServerCall call = CurCall.get();
+    if (call != null) {
+      return call.getInetAddress();
     }
     return null;
   }

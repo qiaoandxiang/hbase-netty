@@ -75,12 +75,14 @@ public class SimpleRpcScheduler extends RpcScheduler {
 
     @Override
     public int compare(CallRunner a, CallRunner b) {
-      RpcServer.Call callA = a.getCall();
-      RpcServer.Call callB = b.getCall();
-      long deadlineA = priority.getDeadline(callA.getHeader(), callA.param);
-      long deadlineB = priority.getDeadline(callB.getHeader(), callB.param);
-      deadlineA = callA.timestamp + Math.min(deadlineA, maxDelay);
-      deadlineB = callB.timestamp + Math.min(deadlineB, maxDelay);
+      ServerCall callA = a.getCall();
+      ServerCall callB = b.getCall();
+      long deadlineA = priority
+          .getDeadline(callA.getHeader(), callA.getParam());
+      long deadlineB = priority
+          .getDeadline(callB.getHeader(), callB.getParam());
+      deadlineA = callA.getTimestamp() + Math.min(deadlineA, maxDelay);
+      deadlineB = callB.getTimestamp() + Math.min(deadlineB, maxDelay);
       return Long.compare(deadlineA, deadlineB);
     }
   }
@@ -191,8 +193,9 @@ public class SimpleRpcScheduler extends RpcScheduler {
 
   @Override
   public boolean dispatch(CallRunner callTask) throws InterruptedException {
-    RpcServer.Call call = callTask.getCall();
-    int level = priority.getPriority(call.getHeader(), call.param, call.getRequestUser());
+    ServerCall call = callTask.getCall();
+    int level = priority.getPriority(call.getHeader(), call.getParam(),
+        call.getRequestUser());
     if (priorityExecutor != null && level > highPriorityLevel) {
       return priorityExecutor.dispatch(callTask);
     } else if (replicationExecutor != null && level == HConstants.REPLICATION_QOS) {
