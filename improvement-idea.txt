@@ -1,0 +1,27 @@
+Some ideas about improving memory allocation of read/write path.
+
+For read, when response is created, it needs to create KeyValue object for each cell.
+After the response is encoded into protobuf rpc messasge, these KV objects are garbage collected.
+
+For write, the Cellblock, to decode this cellblock, it needs to allocate KV object for each cell as well,
+the only deference is that for write, these cells maybe kept at memstore. With CCSMap, this maybe changed.
+Actually, with MSLab, these cells maybe discarded. In this case, we can reuse these KV objects for both 
+read and write.
+
+Each handler can have a KV object cache and reuse these for read and write, so no KV object GC is needed.
+Given that the KV objects allocation/GC happens at the data path, it could save GC for about 30 ~ 40%.
+
+Let me go back with a prototype and do some testings to show the improvement. 
+
+Check the processOneRpc() for write path. The read path is straightforward.
+
+checked with ccsmap, the kv object is discarded when it is a page mode.
+
+SimpleRpcServer vs NettyRpcServer.
+
+The sending model is much better.
+For Netty, each connection is handled by a libevent which deals with the connection's send/recv packets.
+
+For SimpleRpcServer, there is only one thread doing sending of response, essentially, all writes for different connections 
+are sequentially written by the responder thread. As we can see that the response will be bottlehecked by different connections.
+
