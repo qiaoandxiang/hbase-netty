@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Random;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.ByteRange;
@@ -97,6 +98,7 @@ public class TestMemStoreChunkPool {
 
   @Test
   public void testPuttingBackChunksAfterFlushing() throws UnexpectedStateException {
+    //disable compact memory skip list
     byte[] row = Bytes.toBytes("testrow");
     byte[] fam = Bytes.toBytes("testfamily");
     byte[] qf1 = Bytes.toBytes("testqualifier1");
@@ -106,7 +108,10 @@ public class TestMemStoreChunkPool {
     byte[] qf5 = Bytes.toBytes("testqualifier5");
     byte[] val = Bytes.toBytes("testval");
 
-    DefaultMemStore memstore = new DefaultMemStore();
+    // disable compacted memstore
+    Configuration newConf = HBaseConfiguration.create();
+    newConf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
+    DefaultMemStore memstore = new DefaultMemStore(newConf, KeyValue.COMPARATOR);
 
     // Setting up memstore
     memstore.add(new KeyValue(row, fam, qf1, val));
@@ -143,7 +148,10 @@ public class TestMemStoreChunkPool {
     byte[] qf7 = Bytes.toBytes("testqualifier7");
     byte[] val = Bytes.toBytes("testval");
 
-    DefaultMemStore memstore = new DefaultMemStore();
+    // disable compacted memstore
+    Configuration newConf = HBaseConfiguration.create();
+    newConf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
+    DefaultMemStore memstore = new DefaultMemStore(newConf, KeyValue.COMPARATOR);
 
     // Setting up memstore
     memstore.add(new KeyValue(row, fam, qf1, val));

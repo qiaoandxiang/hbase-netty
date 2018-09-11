@@ -52,6 +52,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdge;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.wal.WALFactory;
+import org.junit.Assert;
 import org.junit.experimental.categories.Category;
 
 import com.google.common.base.Joiner;
@@ -89,19 +90,24 @@ public class TestDefaultMemStore extends TestCase {
   }
 
   public void testPutSameCell() {
+    Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean(DefaultMemStore.USEMSLAB_KEY, true);
+    conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
+    memstore = new DefaultMemStore(conf, KeyValue.COMPARATOR);
+
     byte[] bytes = Bytes.toBytes(getName());
     KeyValue kv = new KeyValue(bytes, bytes, bytes, bytes);
     long sizeChangeForFirstCell = this.memstore.add(kv).getFirst();
     long sizeChangeForSecondCell = this.memstore.add(kv).getFirst();
     // make sure memstore size increase won't double-count MSLAB chunk size
     assertEquals(DefaultMemStore.heapSizeChange(kv, true), sizeChangeForFirstCell);
-    if (this.memstore.allocator != null) {
+    if (this.memstore.cellSet.getAllocator() != null) {
       // make sure memstore size increased when using MSLAB
       assertEquals(memstore.getCellLength(kv), sizeChangeForSecondCell);
       // make sure chunk size increased even when writing the same cell, if using MSLAB
-      if (this.memstore.allocator instanceof HeapMemStoreLAB) {
+      if (this.memstore.cellSet.getAllocator() instanceof HeapMemStoreLAB) {
         assertEquals(2 * memstore.getCellLength(kv),
-          ((HeapMemStoreLAB) this.memstore.allocator).getCurrentChunk().getNextFreeOffset());
+          ((HeapMemStoreLAB) this.memstore.cellSet.getAllocator()).getCurrentChunk().getNextFreeOffset());
       }
     } else {
       // make sure no memstore size change w/o MSLAB
@@ -805,6 +811,7 @@ public class TestDefaultMemStore extends TestCase {
   public void testUpsertMSLAB() throws Exception {
     Configuration conf = HBaseConfiguration.create();
     conf.setBoolean(DefaultMemStore.USEMSLAB_KEY, true);
+    conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
     memstore = new DefaultMemStore(conf, KeyValue.COMPARATOR);
 
     int ROW_SIZE = 2048;
@@ -830,6 +837,78 @@ public class TestDefaultMemStore extends TestCase {
         + " (heapsize: " + memstore.heapSize() +
         " size: " + size + ")");
   }
+  
+  public void testUpsertKeepOnlyOneCell() throws Exception {
+    for (int i = 0; i < 4; ++i) {
+      boolean useccsmap = (i & 0x1F) == 0;
+      boolean usemslab = (i & 0x2F) == 0;
+      Configuration conf = HBaseConfiguration.create();
+      conf.setBoolean(DefaultMemStore.USEMSLAB_KEY, usemslab);
+      conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, useccsmap);
+      memstore = new DefaultMemStore(conf, KeyValue.COMPARATOR);
+
+      byte[] row = Bytes.toBytes(0);
+      byte[] qualifier = new byte[4];
+
+      KeyValue kv1 = new KeyValue(row, FAMILY, qualifier, 1, Bytes.toBytes(1));
+      kv1.setSequenceId(1);
+      KeyValue kv2 = new KeyValue(row, FAMILY, qualifier, 1, Bytes.toBytes(1));
+      kv2.setSequenceId(2);
+      memstore.add(kv1);
+      memstore.add(kv2);
+
+      memstore.updateColumnValue(row, FAMILY, qualifier, 3, 3);
+
+      List<KeyValueScanner> scanners = memstore.getScanners(0);
+      for (KeyValueScanner s : scanners) {
+        s.seek(kv1);
+        Assert.assertEquals(null, s.next());
+      }
+    }
+  }
+  
+  /**
+   * Test when we use CCSMAP in memstore, heap size will increase when upsert the same column
+   * @throws Exception
+   */
+  public void testCCSMapHeapSizeChanged() throws Exception {
+    Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean(DefaultMemStore.USEMSLAB_KEY, true);
+    conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, true); 
+    memstore = new DefaultMemStore(conf, KeyValue.COMPARATOR);
+    if (!memstore.cellSet.isCCSMap()) {
+      LOG.info("The ccsmap has been hook closed, skip ...");
+      return;
+    }
+
+    int ROW_SIZE = 50;
+    byte[] qualifier = new byte[ROW_SIZE - 4];
+
+    // Open ccsmap, the heap size will increase when upsert the same column
+    long ts=0;
+    byte[] rowBytes = Bytes.toBytes(0);
+    memstore.updateColumnValue(rowBytes, FAMILY, qualifier, 0, ++ts);
+    for (int newValue = 0; newValue < 100; newValue++) {
+      long ret = memstore.updateColumnValue(rowBytes, FAMILY, qualifier, newValue, ++ts);
+      Assert.assertTrue(ret > 0);
+    }
+    // Delete the same column twice, the heap size still changed
+    KeyValue deletedKV = new KeyValue(rowBytes, FAMILY, qualifier, 123, KeyValue.Type.Delete);
+    memstore.delete(deletedKV);
+    Assert.assertTrue(memstore.delete(deletedKV) > 0);
+    // Put the same cell twice, the heap size still changed
+    KeyValue newKV = new KeyValue(rowBytes, FAMILY, qualifier, 456, KeyValue.Type.Put, rowBytes);
+    {
+      long beforeSize = memstore.size();
+      memstore.add(newKV);
+      long afterSize = memstore.size();
+      Assert.assertTrue(afterSize > beforeSize);
+    }
+    // Roll back cell, the heap size won't changed
+    long sz = memstore.size();
+    memstore.rollback(newKV);
+    Assert.assertTrue(memstore.size() == sz);
+  }
 
   //////////////////////////////////////////////////////////////////////////////
   // Helpers
@@ -846,6 +925,7 @@ public class TestDefaultMemStore extends TestCase {
    */
   public void testUpsertMemstoreSize() throws Exception {
     Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
     memstore = new DefaultMemStore(conf, KeyValue.COMPARATOR);
     long oldSize = memstore.size.get();
 
@@ -857,7 +937,7 @@ public class TestDefaultMemStore extends TestCase {
     kv1.setSequenceId(1); kv2.setSequenceId(1);kv3.setSequenceId(1);
     l.add(kv1); l.add(kv2); l.add(kv3);
 
-    this.memstore.upsert(l, 2);// readpoint is 2
+    this.memstore.upsertAndFetch(l, 2);// readpoint is 2
     long newSize = this.memstore.size.get();
     assert(newSize > oldSize);
     //The kv1 should be removed.
@@ -866,7 +946,7 @@ public class TestDefaultMemStore extends TestCase {
     KeyValue kv4 = KeyValueTestUtil.create("r", "f", "q", 104, "v");
     kv4.setSequenceId(1);
     l.clear(); l.add(kv4);
-    this.memstore.upsert(l, 3);
+    this.memstore.upsertAndFetch(l, 2);
     assertEquals(newSize, this.memstore.size.get());
     //The kv2 should be removed.
     assert(memstore.cellSet.size() == 2);
@@ -910,7 +990,7 @@ public class TestDefaultMemStore extends TestCase {
       KeyValue kv1 = KeyValueTestUtil.create("r", "f", "q", 100, "v");
       kv1.setSequenceId(100);
       l.add(kv1);
-      memstore.upsert(l, 1000);
+      memstore.upsertAndFetch(l, 1000);
       t = memstore.timeOfOldestEdit();
       assertTrue(t == 1234);
     } finally {

@@ -42,6 +42,7 @@ import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.util.StreamUtils;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
+import org.apache.hadoop.hbase.util.CompactedTypeHelper;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.RawComparator;
 
@@ -1180,7 +1181,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
       return "empty";
     }
     return keyToString(this.bytes, this.offset + ROW_OFFSET, getKeyLength()) + "/vlen="
-      + getValueLength() + "/seqid=" + seqId;
+      + getValueLength() + "/seqid=" + getSequenceId();
   }
 
   /**
@@ -2882,6 +2883,113 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
     @Override
     public boolean equals(Object other) {
       return super.equals(other);
+    }
+  }
+  
+  static public class CompactedCellTypeHelper implements
+      CompactedTypeHelper<Cell, Cell> {
+    private KVComparator comparator;
+    
+    final static void writeSeqId(byte[] data, int offset, int length, long seqId) {
+      int pos = offset + lengthWithoutMemstore(length);
+      data[pos] = (byte) (seqId >> 56);
+      data[pos + 1] = (byte) (seqId >> 48);
+      data[pos + 2] = (byte) (seqId >> 40);
+      data[pos + 3] = (byte) (seqId >> 32);
+      data[pos + 4] = (byte) (seqId >> 24);
+      data[pos + 5] = (byte) (seqId >> 16);
+      data[pos + 6] = (byte) (seqId >> 8);
+      data[pos + 7] = (byte) (seqId);
+    }
+    
+    final static long readSeqId(byte[] data, int offset, int len) {
+      int mo = offset + lengthWithoutMemstore(len);
+      return (data[mo] & 0xFFL) << 56 | (data[mo + 1] & 0xFFL) << 48
+          | (data[mo + 2] & 0xFFL) << 40 | (data[mo + 3] & 0xFFL) << 32
+          | (data[mo + 4] & 0xFFL) << 24 | (data[mo + 5] & 0xFFL) << 16
+          | (data[mo + 6] & 0xFFL) << 8 | (data[mo + 7] & 0xFFL);
+    }
+
+    
+    @InterfaceAudience.Private
+    static class OnPageKeyValue extends KeyValue {
+      byte[] data;
+      int offset;
+      int length;
+      
+      public OnPageKeyValue(byte[] data, int offset, int length) {
+        super(data, offset, lengthWithoutMemstore(length));
+        this.data = data;
+        this.offset = offset;
+        this.length = length;
+      }
+          
+      @Override
+      public void setSequenceId(long seqId) {
+        writeSeqId(data, offset, length, seqId);
+      }
+      
+      @Override
+      public long getSequenceId() {
+        return readSeqId(data, offset, length);
+      }
+    }
+
+    public CompactedCellTypeHelper(KVComparator c) {
+      this.comparator = c;
+    }
+
+    @Override
+    public int getCompactedSize(Cell key, Cell value) {
+      long sz = KeyValue.getKeyValueDataStructureSize(key.getRowLength(),
+          key.getFamilyLength(), key.getQualifierLength(),
+          key.getValueLength(), key.getTagsLength()) + Bytes.SIZEOF_LONG; // mvcc
+      if (sz > Integer.MAX_VALUE) {
+        throw new RuntimeException("Too big cell");
+      }
+      return (int) sz;
+    }
+
+    @Override
+    public void compact(Cell key, Cell value, byte[] data, int offset, int len) {
+      assert key == value;
+      KeyValue kv = new KeyValue(key);
+      assert len == kv.getLength() + Bytes.SIZEOF_LONG;
+      System.arraycopy(kv.bytes, kv.offset, data, offset, kv.length);
+      writeSeqId(data, offset, len, key.getSequenceId());
+    }
+    
+    final static int lengthWithoutMemstore(int len) {
+      return len - Bytes.SIZEOF_LONG;
+    }
+
+    @Override
+    public org.apache.hadoop.hbase.util.CompactedTypeHelper.KVPair<Cell, Cell> decomposte(
+        byte[] data, int offset, int len) {
+      KeyValue kv = new OnPageKeyValue(data, offset, len);
+      return new KVPair<Cell, Cell>(kv, kv);
+    }
+
+    @Override
+    public int compare(byte[] ldata, int loffset, int llen, byte[] rdata,
+        int roffset, int rlen) {
+      CompactedTypeHelper.KVPair<Cell, Cell> lc = this.decomposte(ldata,
+          loffset, llen);
+      CompactedTypeHelper.KVPair<Cell, Cell> rc = this.decomposte(rdata,
+          roffset, rlen);
+      return this.comparator.compare(lc.key, rc.key);
+    }
+
+    @Override
+    public int compare(Cell key, byte[] data, int offset, int len) {
+      CompactedTypeHelper.KVPair<Cell, Cell> rc = this.decomposte(data, offset,
+          len);
+      return this.comparator.compare(key, rc.key);
+    }
+
+    @Override
+    public int compare(Cell lkey, Cell rkey) {
+      return comparator.compare(lkey, rkey);
     }
   }
 }

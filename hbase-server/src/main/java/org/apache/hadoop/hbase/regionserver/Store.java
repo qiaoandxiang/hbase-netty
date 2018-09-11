@@ -122,7 +122,26 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * @return memstore size delta
    * @throws IOException
    */
+  @Deprecated
   long upsert(Iterable<Cell> cells, long readpoint) throws IOException;
+  
+  /**
+   * Adds or replaces the specified KeyValues.
+   * <p>
+   * For each KeyValue specified, if a cell with the same row, family, and qualifier exists in
+   * MemStore, it will be replaced. Otherwise, it will just be inserted to MemStore.
+   * <p>
+   * This operation is atomic on each KeyValue (row/family/qualifier) but not necessarily atomic
+   * across all of them.
+   * @param cells
+   * @param readpoint readpoint below which we can safely remove duplicate KVs
+   * @return  A Pair<Long, Collection<Cell>>
+   *  Long: memstore size delta
+   *  Collection<Cell>: The added cells stored in the embedded store. 
+   * @throws IOException
+   */
+  Pair<Long, Collection<Cell>> upsertAndFetch(Collection<Cell> cells,
+      long readpoint) throws IOException;
 
   /**
    * Adds a value to the memstore
@@ -140,8 +159,9 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * Removes a Cell from the memstore. The Cell is removed only if its key & memstoreTS match the
    * key & memstoreTS value of the cell parameter.
    * @param cell
+   * @Return the size of bytes which are rolled back
    */
-  void rollback(final Cell cell);
+  long rollback(final Cell cell);
 
   /**
    * Find the key that matches <i>row</i> exactly, or the one that immediately precedes it. WARNING:

@@ -61,7 +61,7 @@ public class HeapMemStoreLAB implements MemStoreLAB {
   static final String CHUNK_SIZE_KEY = "hbase.hregion.memstore.mslab.chunksize";
   static final int CHUNK_SIZE_DEFAULT = 2048 * 1024;
   static final String MAX_ALLOC_KEY = "hbase.hregion.memstore.mslab.max.allocation";
-  static final int MAX_ALLOC_DEFAULT = 256 * 1024; // allocs bigger than this don't go through
+  static final int MAX_ALLOC_DEFAULT = 1024 * 1024; // allocs bigger than this don't go through
                                                    // allocator
 
   static final Log LOG = LogFactory.getLog(HeapMemStoreLAB.class);
@@ -87,9 +87,9 @@ public class HeapMemStoreLAB implements MemStoreLAB {
     this(new Configuration());
   }
 
-  public HeapMemStoreLAB(Configuration conf) {
+  public HeapMemStoreLAB(Configuration conf, int maxAllocation) {
     chunkSize = conf.getInt(CHUNK_SIZE_KEY, CHUNK_SIZE_DEFAULT);
-    maxAlloc = conf.getInt(MAX_ALLOC_KEY, MAX_ALLOC_DEFAULT);
+    maxAlloc = maxAllocation;
     this.chunkPool = MemStoreChunkPool.getPool(conf);
     // currently chunkQueue is only used for chunkPool
     if (this.chunkPool != null) {
@@ -102,6 +102,10 @@ public class HeapMemStoreLAB implements MemStoreLAB {
     Preconditions.checkArgument(
       maxAlloc <= chunkSize,
       MAX_ALLOC_KEY + " must be less than " + CHUNK_SIZE_KEY);
+  }
+  
+  public HeapMemStoreLAB(Configuration conf) {
+    this(conf, conf.getInt(MAX_ALLOC_KEY, MAX_ALLOC_DEFAULT));
   }
 
   /**
@@ -144,6 +148,10 @@ public class HeapMemStoreLAB implements MemStoreLAB {
   @Override
   public void close() {
     this.closed = true;
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Still have " + openScannerCount.get()
+          + " active scanner when close HeapMemStoreLab");
+    }
     // We could put back the chunks to pool for reusing only when there is no
     // opening scanner which will read their data
     if (chunkPool != null && openScannerCount.get() == 0
@@ -166,6 +174,10 @@ public class HeapMemStoreLAB implements MemStoreLAB {
   @Override
   public void decScannerCount() {
     int count = this.openScannerCount.decrementAndGet();
+    if (count < 0) {
+      LOG.warn("Detected scanner count of MemStoreLab is a negative number: "
+          + count);
+    }
     if (chunkPool != null && count == 0 && this.closed
         && reclaimed.compareAndSet(false, true)) {
       chunkPool.putbackChunks(this.chunkQueue);

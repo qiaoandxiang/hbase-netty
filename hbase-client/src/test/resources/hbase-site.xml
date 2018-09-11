@@ -25,4 +25,8 @@
     <name>hbase.defaults.for.version.skip</name>
     <value>true</value>
   </property>
+  <property>
+    <name>hbase.hregion.memstore.ccsmap.enabled</name>
+    <value>true</value>
+  </property>
 </configuration>

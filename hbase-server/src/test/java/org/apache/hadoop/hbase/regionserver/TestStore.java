@@ -624,7 +624,9 @@ public class TestStore {
 
   @Test
   public void testICV_negMemstoreSize()  throws IOException {
-      init(this.name.getMethodName());
+    Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean(DefaultMemStore.USECCSMAP_KEY, false);  // disable ccsmap in memstore
+    init(this.name.getMethodName(), conf);
 
     long time = 100;
     ManualEnvironmentEdge ee = new ManualEnvironmentEdge();

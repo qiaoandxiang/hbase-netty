@@ -155,4 +155,8 @@
     <description>Skip sanity checks in tests
     </description>
   </property>
+  <property>
+    <name>hbase.hregion.memstore.ccsmap.enabled</name>
+    <value>true</value>
+  </property>  
 </configuration>

@@ -3036,7 +3036,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       byte[] byteNow = Bytes.toBytes(now);
 
       // Nothing to put/delete -- an exception in the above such as NoSuchColumnFamily?
-      if (numReadyToWrite <= 0) return 0L;
+      if (numReadyToWrite <= 0) return 0;
 
       // We've now grabbed as many mutations off the list as we can
 
@@ -3726,7 +3726,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       store.rollback(cell);
       kvsRolledback++;
     }
-    LOG.debug("rollbackMemstore rolled back " + kvsRolledback);
+    LOG.debug("rollbackMemstore rolled back " + kvsRolledback + ", region = " + this.getRegionInfo().getEncodedName());
   }
 
   @Override
@@ -7089,8 +7089,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             Store store = entry.getKey();
             if (store.getFamily().getMaxVersions() == 1) {
               // upsert if VERSIONS for this CF == 1
-              size += store.upsert(entry.getValue(), getSmallestReadPoint());
-              memstoreCells.addAll(entry.getValue());
+              Pair<Long, Collection<Cell>> res = store.upsertAndFetch(entry.getValue(), getSmallestReadPoint());
+              size += res.getFirst();
+              memstoreCells.addAll(res.getSecond());
             } else {
               // otherwise keep older versions around
               for (Cell cell: entry.getValue()) {
@@ -7285,7 +7286,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     } finally {
       if (rowLock != null) rowLock.release();
       // if the wal sync was unsuccessful, remove keys from memstore
-      if (doRollBackMemstore) rollbackMemstore(memstoreCells);
+      if (doRollBackMemstore) {
+        rollbackMemstore(memstoreCells);
+      }
       if (writeEntry != null) mvcc.completeMemstoreInsertWithSeqNum(writeEntry, walKey);
     }
     // Request a cache flush.  Do it outside update lock.

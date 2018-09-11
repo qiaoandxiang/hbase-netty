@@ -693,10 +693,13 @@ public class HStore implements Store {
   }
 
   @Override
-  public void rollback(final Cell cell) {
+  /**
+   * @Return the size of bytes which are rolled back
+   */
+  public long rollback(final Cell cell) {
     lock.readLock().lock();
     try {
-      this.memstore.rollback(cell);
+      return this.memstore.rollback(cell);
     } finally {
       lock.readLock().unlock();
     }
@@ -2222,9 +2225,15 @@ public class HStore implements Store {
 
   @Override
   public long upsert(Iterable<Cell> cells, long readpoint) throws IOException {
+    throw new RuntimeException("Bug: deprecated methods, use upsertAndFetch instead");
+  }
+  
+  @Override
+  public Pair<Long, Collection<Cell>> upsertAndFetch(Collection<Cell> cells,
+      long readpoint) throws IOException {
     this.lock.readLock().lock();
     try {
-      return this.memstore.upsert(cells, readpoint);
+      return this.memstore.upsertAndFetch(cells, readpoint);
     } finally {
       this.lock.readLock().unlock();
     }

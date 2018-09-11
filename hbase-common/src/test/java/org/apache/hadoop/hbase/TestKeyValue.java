@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -38,11 +39,15 @@ import org.apache.hadoop.hbase.KeyValue.KVComparator;
 import org.apache.hadoop.hbase.KeyValue.MetaComparator;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.CompactedTypeHelper;
+import org.apache.hadoop.hbase.util.CompactedTypeHelper.KVPair;
+import org.junit.Assert;
 
 import static org.junit.Assert.assertNotEquals;
 
 public class TestKeyValue extends TestCase {
   private final Log LOG = LogFactory.getLog(this.getClass().getName());
+  static private final Random random = new Random();
 
   public void testColumnCompare() throws Exception {
     final byte [] a = Bytes.toBytes("aaa");
@@ -848,5 +853,57 @@ public class TestKeyValue extends TestCase {
     assertEquals(kvA1.hashCode(), kvA2.hashCode());
     assertNotEquals(kvA1.hashCode(), kvB.hashCode());
   }
+  
+  private Type[] typeArray = new Type[]{Type.Delete, Type.DeleteColumn, Type.DeleteFamily, Type.Put, Type.Maximum, Type.Minimum};
+  private KeyValue randomKeyValue() {
+    String key = Integer.toString(random.nextInt());
+    String qualifier = Integer.toString(random.nextInt());
+    qualifier = qualifier.substring(random.nextInt(qualifier.length() - 1));
+    String family = Integer.toString(random.nextInt());
+    family = family.substring(random.nextInt(family.length() - 1));
+    String value = Integer.toBinaryString(random.nextInt());
+    value = value.substring(random.nextInt(value.length() - 1));
+    long ts = random.nextLong();
+    Type type = typeArray[random.nextInt(typeArray.length)];
+    return new KeyValue(key.getBytes(), family.getBytes(), qualifier.getBytes(), ts, type, value.getBytes());
+  }
 
+  public void testKeyValueCompactedTypeHelper() {
+    final int RANDOM_TEST_TIMES = 100000;
+    KVComparator standardCompacrator = KeyValue.COMPARATOR;
+    CompactedTypeHelper<Cell, Cell> compactedHelper = new KeyValue.CompactedCellTypeHelper(standardCompacrator);
+    for (int i = 0; i < RANDOM_TEST_TIMES; ++i) {
+      KeyValue kv1 = randomKeyValue();
+      KeyValue kv2 = randomKeyValue();
+      // Test comparator
+      assertEquals(
+          standardCompacrator.compare(kv1, kv2),
+          compactedHelper.compare(kv1, kv2.getBuffer(), kv2.getOffset(),
+              kv2.getLength()));
+      assertEquals(
+          standardCompacrator.compare(kv1, kv2),
+          compactedHelper.compare(kv1.getBuffer(), kv1.getOffset(),
+              kv1.getLength(), kv2.getBuffer(), kv2.getOffset(),
+              kv2.getLength()));
+      assertEquals(standardCompacrator.compare(kv1, kv2), compactedHelper.compare(kv1, kv2));
+      
+
+      // Test compact
+      int csz = compactedHelper.getCompactedSize(kv1, kv1);
+      int bufferLength = 1 + csz + random.nextInt(csz);
+      byte[] buffer = new byte[bufferLength];
+      int offset = random.nextInt(buffer.length - csz);
+      compactedHelper.compact(kv1, kv1, buffer, offset, csz);
+
+      assertEquals(compactedHelper.compare(kv1, buffer, offset, csz), 0);
+
+      // Test decomposte
+      KVPair<Cell, Cell> kvpair = compactedHelper.decomposte(buffer, offset, csz);
+      assertEquals(standardCompacrator.compare(kv1, kvpair.key), 0);
+      assertEquals(standardCompacrator.compare(kvpair.value, kv1), 0);
+      assertEquals(kv1.getMvccVersion(), kvpair.key.getMvccVersion());
+      assertEquals(kv1.getMvccVersion(), kvpair.value.getMvccVersion());
+      
+    }
+  }
 }

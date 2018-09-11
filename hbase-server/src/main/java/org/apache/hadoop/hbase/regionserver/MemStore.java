@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
@@ -82,8 +84,9 @@ public interface MemStore extends HeapSize {
    * Remove n key from the memstore. Only kvs that have the same key and the same memstoreTS are
    * removed. It is ok to not update timeRangeTracker in this call.
    * @param cell
+   * @Return the size of bytes which are rolled back
    */
-  void rollback(final Cell cell);
+  long rollback(final Cell cell);
 
   /**
    * Write a delete
@@ -131,7 +134,28 @@ public interface MemStore extends HeapSize {
    * @param readpoint readpoint below which we can safely remove duplicate Cells.
    * @return change in memstore size
    */
+  @Deprecated
   long upsert(Iterable<Cell> cells, long readpoint);
+  
+  /**
+   * Update or insert the specified cells.
+   * <p>
+   * For each Cell, insert into MemStore. This will atomically upsert the value for that
+   * row/family/qualifier. If a Cell did already exist, it will then be removed.
+   * <p>
+   * Currently the memstoreTS is kept at 0 so as each insert happens, it will be immediately
+   * visible. May want to change this so it is atomic across all KeyValues.
+   * <p>
+   * This is called under row lock, so Get operations will still see updates atomically. Scans will
+   * only see each KeyValue update as atomic.
+   * @param cells
+   * @param readpoint readpoint below which we can safely remove duplicate Cells.
+   * @return  A Pair<Long, Collection<Cell>>
+   *  Long: memstore size delta
+   *  Collection<Cell>: The added cells stored in the embedded store.
+   */
+  Pair<Long, Collection<Cell>> upsertAndFetch(Collection<Cell> cells,
+      long readpoint);
 
   /**
    * @return scanner over the memstore. This might include scanner over the snapshot when one is

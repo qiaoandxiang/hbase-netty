@@ -298,33 +298,42 @@ public class TestHRegion {
         super.sync(txid);
       }
     }
-
-    FileSystem fs = FileSystem.get(CONF);
-    Path rootDir = new Path(dir + "testMemstoreSnapshotSize");
-    MyFaultyFSLog faultyLog = new MyFaultyFSLog(fs, rootDir, "testMemstoreSnapshotSize", CONF);
-    HRegion region = initHRegion(tableName, null, null, name.getMethodName(),
-        CONF, false, Durability.SYNC_WAL, faultyLog, COLUMN_FAMILY_BYTES);
-
-    Store store = region.getStore(COLUMN_FAMILY_BYTES);
-    // Get some random bytes.
-    byte [] value = Bytes.toBytes(name.getMethodName());
-    faultyLog.setStoreFlushCtx(store.createFlushContext(12345));
-
-    Put put = new Put(value);
-    put.add(COLUMN_FAMILY_BYTES, Bytes.toBytes("abc"), value);
-    faultyLog.setFailureType(FaultyFSLog.FailureType.SYNC);
-
-    boolean threwIOE = false;
+    
+    //disable ccsmap
+    boolean old = TEST_UTIL.getConfiguration().getBoolean(DefaultMemStore.USECCSMAP_KEY, DefaultMemStore.USECCSMAP_DEFAULT);
+    TEST_UTIL.getConfiguration().setBoolean(DefaultMemStore.USECCSMAP_KEY, false);
     try {
-      region.put(put);
-    } catch (IOException ioe) {
-      threwIOE = true;
+      FileSystem fs = FileSystem.get(CONF);
+      Path rootDir = new Path(dir + "testMemstoreSnapshotSize");
+      MyFaultyFSLog faultyLog = new MyFaultyFSLog(fs, rootDir, "testMemstoreSnapshotSize", CONF);
+      HRegion region = initHRegion(tableName, null, null, name.getMethodName(),
+          CONF, false, Durability.SYNC_WAL, faultyLog, COLUMN_FAMILY_BYTES);
+
+      Store store = region.getStore(COLUMN_FAMILY_BYTES);
+      // Get some random bytes.
+      byte [] value = Bytes.toBytes(name.getMethodName());
+      StoreFlushContext flushContext = store.createFlushContext(12345);
+      faultyLog.setStoreFlushCtx(flushContext);
+
+      Put put = new Put(value);
+      put.add(COLUMN_FAMILY_BYTES, Bytes.toBytes("abc"), value);
+      faultyLog.setFailureType(FaultyFSLog.FailureType.SYNC);
+
+      boolean threwIOE = false;
+      try {
+        region.put(put);
+      } catch (IOException ioe) {
+        threwIOE = true;
+      } finally {
+        assertTrue("The regionserver should have thrown an exception", threwIOE);
+      }
+      long sz = store.getFlushableSize();
+      assertTrue("flushable size should be zero, but it is " + sz, sz == 0);
+      //close region will fail since FaultyFSLog
+      //HRegion.closeHRegion(region);
     } finally {
-      assertTrue("The regionserver should have thrown an exception", threwIOE);
+      TEST_UTIL.getConfiguration().setBoolean(DefaultMemStore.USECCSMAP_KEY, old);
     }
-    long sz = store.getFlushableSize();
-    assertTrue("flushable size should be zero, but it is " + sz, sz == 0);
-    HRegion.closeHRegion(region);
   }
 
   /**

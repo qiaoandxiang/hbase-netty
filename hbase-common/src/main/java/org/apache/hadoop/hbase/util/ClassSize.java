@@ -178,7 +178,7 @@ public class ClassSize {
 
     TIMERANGE_TRACKER = align(ClassSize.OBJECT + Bytes.SIZEOF_LONG * 2);
 
-    CELL_SKIPLIST_SET = align(OBJECT + REFERENCE);
+    CELL_SKIPLIST_SET = align(OBJECT + 3 * REFERENCE + Bytes.SIZEOF_BOOLEAN);
   }
 
   /**

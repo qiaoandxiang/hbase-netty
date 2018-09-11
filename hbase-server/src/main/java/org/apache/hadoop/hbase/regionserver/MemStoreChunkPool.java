@@ -77,6 +77,7 @@ public class MemStoreChunkPool {
   private static final int statThreadPeriod = 60 * 5;
   private AtomicLong createdChunkCount = new AtomicLong();
   private AtomicLong reusedChunkCount = new AtomicLong();
+  private AtomicLong managedChunkCount = new AtomicLong();
 
   MemStoreChunkPool(Configuration conf, int chunkSize, int maxCount,
       int initialCount) {
@@ -85,6 +86,7 @@ public class MemStoreChunkPool {
     this.reclaimedChunks = new LinkedBlockingQueue<Chunk>();
     for (int i = 0; i < initialCount; i++) {
       Chunk chunk = new Chunk(chunkSize);
+      managedChunkCount.incrementAndGet();
       chunk.init();
       reclaimedChunks.add(chunk);
     }
@@ -106,6 +108,7 @@ public class MemStoreChunkPool {
     if (chunk == null) {
       chunk = new Chunk(chunkSize);
       createdChunkCount.incrementAndGet();
+      managedChunkCount.incrementAndGet();
     } else {
       chunk.reset();
       reusedChunkCount.incrementAndGet();
@@ -129,6 +132,7 @@ public class MemStoreChunkPool {
       if (LOG.isTraceEnabled()) {
         LOG.trace("Left " + chunks.size() + " unreclaimable chunks, removing them from queue");
       }
+      managedChunkCount.addAndGet(-chunks.size());
       chunks.clear();
     }
   }
@@ -140,6 +144,7 @@ public class MemStoreChunkPool {
    */
   void putbackChunk(Chunk chunk) {
     if (reclaimedChunks.size() >= this.maxCount) {
+      managedChunkCount.decrementAndGet();
       return;
     }
     reclaimedChunks.add(chunk);
@@ -153,6 +158,7 @@ public class MemStoreChunkPool {
    * Only used in testing
    */
   void clearChunks() {
+    managedChunkCount.addAndGet(-this.reclaimedChunks.size());
     this.reclaimedChunks.clear();
   }
 
@@ -175,10 +181,12 @@ public class MemStoreChunkPool {
     if (!LOG.isDebugEnabled()) return;
     long created = createdChunkCount.get();
     long reused = reusedChunkCount.get();
+    long managed = managedChunkCount.get();
     long total = created + reused;
     LOG.debug("Stats: current pool size=" + reclaimedChunks.size()
         + ",created chunk count=" + created
         + ",reused chunk count=" + reused
+        + ",managed chunk count=" + managed
         + ",reuseRatio=" + (total == 0 ? "0" : StringUtils.formatPercent(
             (float) reused / (float) total, 2)));
   }
@@ -229,6 +237,10 @@ public class MemStoreChunkPool {
 
   int getMaxCount() {
     return this.maxCount;
+  }
+  
+  int getChunkSize() {
+    return chunkSize;
   }
 
   @VisibleForTesting

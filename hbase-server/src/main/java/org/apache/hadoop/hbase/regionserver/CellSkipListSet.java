@@ -26,9 +26,17 @@ import java.util.SortedSet;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.util.ByteRange;
+import org.apache.hadoop.hbase.util.CompactedConcurrentSkipListMap;
+import org.apache.hadoop.hbase.util.CompactedConcurrentSkipListMap.PutAndFetch;
+import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.util.ReflectionUtils;
 
 /**
  * A {@link java.util.Set} of {@link Cell}s implemented on top of a
@@ -46,14 +54,92 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
  */
 @InterfaceAudience.Private
 public class CellSkipListSet implements NavigableSet<Cell> {
+  private final static Log LOG = LogFactory.getLog(CellSkipListSet.class);
   private final ConcurrentNavigableMap<Cell, Cell> delegatee;
+  private final MemStoreChunkPool chunkPool;
+  private final MemStoreLAB allocator;
+  private boolean isEmbededCCSMap = false;
+  
+  final private class PageAllocatorForCompactedMap implements
+      CompactedConcurrentSkipListMap.PageAllocator {
+
+    @Override
+    public Object[] allocateHeapKVPage(int sz) {
+      return new Object[sz];
+    }
+
+    @Override
+    public byte[] allocatePages(int sz) {
+      if (allocator != null) {
+        ByteRange a = allocator.allocateBytes(sz);
+        // The chunk is only used for pages, always get a clean new page once
+        assert a.getOffset() == 0;
+        assert a.getBytes().length >= sz;
+        return a.getBytes();
+      } else {
+        return new byte[sz];
+      }
+    }
+  }
+  
+  CellSkipListSet(Configuration conf, final KeyValue.KVComparator c) {
+    if (conf.getBoolean(DefaultMemStore.USEMSLAB_KEY,
+        DefaultMemStore.USEMSLAB_DEFAULT)) {
+      this.chunkPool = MemStoreChunkPool.getPool(conf);
+    } else {
+      this.chunkPool = null;
+    }
+    isEmbededCCSMap = conf.getBoolean(DefaultMemStore.USECCSMAP_KEY,
+        DefaultMemStore.USECCSMAP_DEFAULT);
+    if (this.chunkPool != null) {
+      if (isEmbededCCSMap) {
+        this.allocator = new HeapMemStoreLAB(conf,
+            this.chunkPool.getChunkSize());
+      } else {
+        String className = conf.get(DefaultMemStore.MSLAB_CLASS_NAME,
+            HeapMemStoreLAB.class.getName());
+        this.allocator = ReflectionUtils.instantiateWithCustomCtor(className,
+            new Class[] { Configuration.class }, new Object[] { conf });
+      }
+    } else {
+      this.allocator = null;
+    }
+    
+    if (isEmbededCCSMap) {
+      delegatee = createCompcatedSkipList(conf, c);
+    } else {
+      delegatee = new ConcurrentSkipListMap<Cell, Cell>(c);
+    }
+  }
+  
+  private ConcurrentNavigableMap<Cell, Cell> createCompcatedSkipList(
+      Configuration conf, KeyValue.KVComparator c) {
+    CompactedConcurrentSkipListMap.PageSetting ps = new CompactedConcurrentSkipListMap.PageSetting();
+
+    int pageSize = chunkPool == null ? conf.getInt(
+        HeapMemStoreLAB.CHUNK_SIZE_KEY, HeapMemStoreLAB.CHUNK_SIZE_DEFAULT)
+        : this.chunkPool.getChunkSize();
+    int threshold = conf.getInt(HeapMemStoreLAB.MAX_ALLOC_KEY,
+        HeapMemStoreLAB.MAX_ALLOC_DEFAULT);
+
+    ps.setDataPageSize(pageSize);
+    ps.setHeapKVThreshold(threshold);
+    ps.setPageAllocator(new PageAllocatorForCompactedMap());
+
+    return new CompactedConcurrentSkipListMap<Cell, Cell>(
+        new KeyValue.CompactedCellTypeHelper(c), ps);
+  }
 
   CellSkipListSet(final KeyValue.KVComparator c) {
     this.delegatee = new ConcurrentSkipListMap<Cell, Cell>(c);
+    this.chunkPool = null;
+    this.allocator = null;
   }
 
   CellSkipListSet(final ConcurrentNavigableMap<Cell, Cell> m) {
     this.delegatee = m;
+    this.chunkPool = null;
+    this.allocator = null;
   }
 
   public Cell ceiling(Cell e) {
@@ -133,6 +219,22 @@ public class CellSkipListSet implements NavigableSet<Cell> {
   public boolean add(Cell e) {
     return this.delegatee.put(e, e) == null;
   }
+  
+  /**
+   * Add cell into set, and return the just added cell
+   * @param e
+   * @return A Pair<Boolean, Cell>
+   *  Boolean: Whether the added cell is not present
+   *  Cell: The cell stored in the map
+   */
+  public Pair<Boolean, Cell> addAndFetch(Cell e) {
+    if (isEmbededCCSMap) {
+      PutAndFetch<Cell> result = ((CompactedConcurrentSkipListMap<Cell, Cell>) delegatee)
+          .putAndFetch(e, e);
+      return new Pair<Boolean, Cell>(result.old() == null, result.current());
+    }
+    return new Pair<Boolean, Cell>(this.delegatee.put(e, e) == null, e);
+  }
 
   public boolean addAll(Collection<? extends Cell> c) {
     throw new UnsupportedOperationException("Not implemented");
@@ -181,5 +283,42 @@ public class CellSkipListSet implements NavigableSet<Cell> {
 
   public <T> T[] toArray(T[] a) {
     throw new UnsupportedOperationException("Not implemented");
+  }
+  
+  void incrScannerReference() {
+    if (allocator != null) {
+      allocator.incScannerCount();
+    }
+  }
+
+  void decrScannerReference() {
+    if (allocator != null) {
+      allocator.decScannerCount();
+    }
+  }
+
+  void close() {
+    if (isEmbededCCSMap) {
+      CompactedConcurrentSkipListMap<?, ?> m = (CompactedConcurrentSkipListMap<?, ?>) delegatee;
+      if (m != null && LOG.isTraceEnabled()) {
+        LOG.trace("Sealed ccsmap, memory summary:  "
+            + m.getMemoryUsage().toString());
+      }
+    }
+    if (allocator != null) {
+      allocator.close();
+    }
+  }
+  
+  MemStoreLAB getAllocator() {
+    return this.allocator;
+  }
+
+  boolean isEntryUncleanable() {
+    return this.isEmbededCCSMap;
+  }
+
+  boolean isCCSMap() {
+    return this.isEmbededCCSMap;
   }
 }
