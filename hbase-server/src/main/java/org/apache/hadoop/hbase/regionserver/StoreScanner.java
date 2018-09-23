@@ -39,6 +39,7 @@ import org.apache.hadoop.hbase.client.IsolationLevel;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.filter.Filter;
+import org.apache.hadoop.hbase.ByteBufferKeyValue;
 import org.apache.hadoop.hbase.regionserver.ScannerContext.LimitScope;
 import org.apache.hadoop.hbase.regionserver.ScannerContext.NextState;
 import org.apache.hadoop.hbase.regionserver.handler.ParallelSeekHandler;
@@ -592,7 +593,18 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
           // add to results only if we have skipped #storeOffset kvs
           // also update metric accordingly
           if (this.countPerRow > storeOffset) {
-            outResult.add(cell);
+            Cell cellFromPool = cell;
+            if (cell instanceof ByteBufferKeyValue) {
+              cellFromPool = scannerContext.allocateCell();
+              if (cellFromPool != null) {
+                ((ByteBufferKeyValue) cell).copy((ByteBufferKeyValue) cellFromPool);
+                outResult.add(cellFromPool);
+              } {
+                LOG.error("Something is wrong!!!");
+              }
+            }
+
+            outResult.add(cellFromPool);
 
             // Update local tracking information
             count++;

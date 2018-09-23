@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScannable;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.CellUtil;
@@ -42,6 +43,8 @@ public class HBaseRpcControllerImpl implements HBaseRpcController {
    * The time, in ms before the call should expire.
    */
   private Integer callTimeout;
+
+  private List<Cell> cellPool;
 
   private boolean done = false;
 
@@ -71,11 +74,21 @@ public class HBaseRpcControllerImpl implements HBaseRpcController {
   }
 
   public HBaseRpcControllerImpl(final CellScanner cellScanner) {
+    this(cellScanner, null);
+  }
+  public HBaseRpcControllerImpl(final CellScanner cellScanner, final List<Cell> cellPool) {
     this.cellScanner = cellScanner;
+    this.cellPool = cellPool;
   }
 
   public HBaseRpcControllerImpl(final List<CellScannable> cellIterables) {
     this.cellScanner = cellIterables == null ? null : CellUtil.createCellScanner(cellIterables);
+    this.cellPool = null;
+  }
+
+
+  public List<Cell> getCellPool () {
+    return this.cellPool;
   }
 
   /**

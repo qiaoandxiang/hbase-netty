@@ -99,10 +99,33 @@ public class ScannerContext {
 
   private Cell lastPeekedCell = null;
 
+  private List<Cell> cellPool;
+  private int curCellPoolIndex;
+
   /**
    * Tracks the relevant server side metrics during scans. null when metrics should not be tracked
    */
   final ServerSideScanMetrics metrics;
+
+
+  public void setCellPool (List<Cell> cellPool) {
+    this.cellPool = cellPool;
+    curCellPoolIndex = 0;
+  }
+
+  public Cell allocateCell() {
+    if (cellPool != null) {
+      if (curCellPoolIndex < cellPool.size()) {
+        return cellPool.get(curCellPoolIndex ++);
+      }
+    }
+    return null;
+  }
+
+  public void resetCellPool() {
+    this.curCellPoolIndex = 0;
+  }
+
 
   ScannerContext(boolean keepProgress, LimitFields limitsToCopy, boolean trackMetrics) {
     this.limits = new LimitFields();

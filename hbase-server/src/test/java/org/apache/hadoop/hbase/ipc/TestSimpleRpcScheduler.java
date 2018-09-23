@@ -41,6 +41,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HConstants;
@@ -104,7 +105,7 @@ public class TestSimpleRpcScheduler {
     CallRunner task = createMockTask();
     task.setStatus(new MonitoredRPCHandlerImpl());
     scheduler.dispatch(task);
-    verify(task, timeout(10000)).run();
+    verify(task, timeout(10000)).run(null);
     scheduler.stop();
   }
 
@@ -206,7 +207,7 @@ public class TestSimpleRpcScheduler {
     };
     for (CallRunner task : tasks) {
       task.setStatus(new MonitoredRPCHandlerImpl());
-      doAnswer(answerToRun).when(task).run();
+      doAnswer(answerToRun).when(task).run(null);
     }
 
     RpcScheduler scheduler = new SimpleRpcScheduler(
@@ -218,7 +219,7 @@ public class TestSimpleRpcScheduler {
       scheduler.dispatch(task);
     }
     for (CallRunner task : tasks) {
-      verify(task, timeout(10000)).run();
+      verify(task, timeout(10000)).run(null);
     }
     scheduler.stop();
 
@@ -411,7 +412,7 @@ public class TestSimpleRpcScheduler {
         Threads.sleepWithoutInterrupt(sleepInterval);
         return null;
       }
-    }).when(callTask).run();
+    }).when(callTask).run(null);
   }
 
   private static void waitUntilQueueEmpty(SimpleRpcScheduler scheduler)
@@ -574,7 +575,7 @@ public class TestSimpleRpcScheduler {
 
     CallRunner cr = new CallRunner(null, putCall) {
       @Override
-      public void run() {
+      public void run(List<Cell> cellPool) {
         if (sleepTime <= 0) return;
         try {
           LOG.warn("Sleeping for " + sleepTime);

@@ -497,6 +497,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     private ByteBufferKeyOnlyKeyValue bufBackedKeyOnlyKv = new ByteBufferKeyOnlyKeyValue();
     // A pair for reusing in blockSeek() so that we don't garbage lot of objects
     final ObjectIntPair<ByteBuffer> pair = new ObjectIntPair<>();
+    private ByteBufferKeyValue bbKv;
 
     /**
      * The next indexed key is to keep track of the indexed key of the next data block.
@@ -517,6 +518,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       this.cacheBlocks = cacheBlocks;
       this.pread = pread;
       this.isCompaction = isCompaction;
+      this.bbKv = new ByteBufferKeyValue(null, 0, 0);
     }
 
     void updateCurrBlockRef(HFileBlock block) {
@@ -964,7 +966,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       } else {
         ByteBuffer buf = blockBuffer.asSubByteBuffer(cellBufSize);
         if (buf.isDirect()) {
-          ret = new ByteBufferKeyValue(buf, buf.position(), cellBufSize, seqId);
+          bbKv.reInitialize(buf, buf.position(), cellBufSize, seqId);
+          ret = bbKv;
         } else {
           if (currTagsLen > 0) {
             ret = new SizeCachedKeyValue(buf.array(), buf.arrayOffset() + buf.position(),

@@ -32,7 +32,9 @@ import java.util.HashMap;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Abortable;
+import org.apache.hadoop.hbase.ByteBufferKeyValue;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hbase.thirdparty.io.netty.util.internal.StringUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -267,11 +269,15 @@ public abstract class RpcExecutor {
   /**
    * Handler thread run the {@link CallRunner#run()} in.
    */
-  protected class Handler extends Thread {
+  public class Handler extends Thread {
     /**
      * Q to find CallRunners to run in.
      */
     final BlockingQueue<CallRunner> q;
+
+    // A Cell lists which serves a pool for read (maybe later for write), as the KVs read from
+    // Scanners are discarded after cells are encoded into cellblock.
+    final List<Cell> cellPool;
 
     final double handlerFailureThreshhold;
 
@@ -285,6 +291,10 @@ public abstract class RpcExecutor {
       this.q = q;
       this.handlerFailureThreshhold = handlerFailureThreshhold;
       this.activeHandlerCount = activeHandlerCount;
+      this.cellPool = new ArrayList<>(10000);
+      for (int i = 0; i < 10000; i++) {
+        this.cellPool.add(new ByteBufferKeyValue(null, 0, 0));
+      }
     }
 
     /**
@@ -321,7 +331,7 @@ public abstract class RpcExecutor {
       cr.setStatus(status);
       try {
         this.activeHandlerCount.incrementAndGet();
-        cr.run();
+        cr.run(cellPool);
       } catch (Throwable e) {
         if (e instanceof Error) {
           int failedCount = failedHandlerCount.incrementAndGet();

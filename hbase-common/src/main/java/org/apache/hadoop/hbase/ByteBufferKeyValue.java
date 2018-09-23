@@ -34,9 +34,9 @@ import org.apache.hbase.thirdparty.com.google.common.annotations.VisibleForTesti
 @InterfaceAudience.Private
 public class ByteBufferKeyValue extends ByteBufferExtendedCell {
 
-  protected final ByteBuffer buf;
-  protected final int offset;
-  protected final int length;
+  protected  ByteBuffer buf;
+  protected  int offset;
+  protected  int length;
   private long seqId = 0;
 
   public static final int FIXED_OVERHEAD = ClassSize.OBJECT + ClassSize.REFERENCE
@@ -53,6 +53,20 @@ public class ByteBufferKeyValue extends ByteBufferExtendedCell {
     this.buf = buf;
     this.offset = offset;
     this.length = length;
+  }
+
+  public void copy(ByteBufferKeyValue copy) {
+    copy.buf = this.buf;
+    copy.offset = this.offset;
+    copy.length = this.length;
+    copy.seqId = this.seqId;
+  }
+
+  public void reInitialize(ByteBuffer buf, int offset, int length, long seqId) {
+    this.buf = buf;
+    this.offset = offset;
+    this.length = length;
+    this.seqId = seqId;
   }
 
   @VisibleForTesting

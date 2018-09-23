@@ -89,18 +89,8 @@ import org.apache.hadoop.hbase.exceptions.ScannerResetException;
 import org.apache.hadoop.hbase.exceptions.UnknownProtocolException;
 import org.apache.hadoop.hbase.filter.ByteArrayComparable;
 import org.apache.hadoop.hbase.io.TimeRange;
-import org.apache.hadoop.hbase.ipc.HBaseRPCErrorHandler;
-import org.apache.hadoop.hbase.ipc.HBaseRpcController;
-import org.apache.hadoop.hbase.ipc.PriorityFunction;
-import org.apache.hadoop.hbase.ipc.QosPriority;
-import org.apache.hadoop.hbase.ipc.RpcCallContext;
-import org.apache.hadoop.hbase.ipc.RpcCallback;
-import org.apache.hadoop.hbase.ipc.RpcServer;
+import org.apache.hadoop.hbase.ipc.*;
 import org.apache.hadoop.hbase.ipc.RpcServer.BlockingServiceAndInterface;
-import org.apache.hadoop.hbase.ipc.RpcServerFactory;
-import org.apache.hadoop.hbase.ipc.RpcServerInterface;
-import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
-import org.apache.hadoop.hbase.ipc.ServerRpcController;
 import org.apache.hadoop.hbase.log.HBaseMarkers;
 import org.apache.hadoop.hbase.master.MasterRpcServices;
 import org.apache.hadoop.hbase.net.Address;
@@ -829,7 +819,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
           try {
             Get get = ProtobufUtil.toGet(pbGet);
             if (context != null) {
-              r = get(get, (region), closeCallBack, context);
+              r = get(get, (region), closeCallBack, context, null);
             } else {
               r = region.get(get);
             }
@@ -2450,7 +2440,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
       }
       if (existence == null) {
         if (context != null) {
-          r = get(clientGet, (region), null, context);
+          r = get(clientGet, (region), null, context, controller);
         } else {
           // for test purpose
           r = region.get(clientGet);
@@ -2501,7 +2491,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
   }
 
   private Result get(Get get, HRegion region, RegionScannersCloseCallBack closeCallBack,
-      RpcCallContext context) throws IOException {
+      RpcCallContext context, final RpcController controller) throws IOException {
     region.prepareGet(get);
     boolean stale = region.getRegionInfo().getReplicaId() != 0;
 
@@ -2523,6 +2513,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     RegionScannerImpl scanner = null;
     try {
       scanner = region.getScanner(scan);
+      scanner.setCellPool(((HBaseRpcControllerImpl)controller).getCellPool());
       scanner.next(results);
     } finally {
       if (scanner != null) {
@@ -3271,6 +3262,8 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
       } else {
         rsh = newRegionScanner(request, builder);
       }
+
+
     } catch (IOException e) {
       if (e == SCANNER_ALREADY_CLOSED) {
         // Now we will close scanner automatically if there are no more results for this region but
@@ -3326,6 +3319,10 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     // now let's do the real scan.
     long maxQuotaResultSize = Math.min(maxScannerResultSize, quota.getReadAvailable());
     RegionScanner scanner = rsh.s;
+
+    // Pass cellPool to the scannerImpl
+    ((RegionScannerImpl)scanner).setCellPool(((HBaseRpcControllerImpl)controller).getCellPool());
+
     // this is the limit of rows for this scan, if we the number of rows reach this value, we will
     // close the scanner.
     int limitOfRows;

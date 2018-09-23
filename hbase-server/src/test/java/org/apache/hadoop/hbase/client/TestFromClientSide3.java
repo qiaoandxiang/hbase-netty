@@ -424,13 +424,13 @@ public class TestFromClientSide3 {
   public void testHTableWithLargeBatch() throws Exception {
     Table table = TEST_UTIL.createTable(TableName.valueOf(name.getMethodName()),
         new byte[][] { FAMILY });
-    int sixtyFourK = 64 * 1024;
+    int sixtyFourK = 1024;
     try {
       List actions = new ArrayList();
       Object[] results = new Object[(sixtyFourK + 1) * 2];
 
       for (int i = 0; i < sixtyFourK + 1; i ++) {
-        Put put1 = new Put(ROW);
+        Put put1 = new Put(Bytes.toBytes(i));
         put1.addColumn(FAMILY, QUALIFIER, VALUE);
         actions.add(put1);
 
@@ -440,6 +440,15 @@ public class TestFromClientSide3 {
       }
 
       table.batch(actions, results);
+      TEST_UTIL.getAdmin().flush(table.getName());
+
+      ResultScanner scanner = table.getScanner(FAMILY);
+      Result r;
+      while ((r = scanner.next()) != null) {
+        for (Cell c : r.listCells()) {
+          LOG.info(CellUtil.toString(c, true));
+        }
+      }
     } finally {
       table.close();
     }

@@ -19,9 +19,11 @@ package org.apache.hadoop.hbase.ipc;
 
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.hadoop.hbase.CallDroppedException;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.trace.TraceUtil;
@@ -91,7 +93,7 @@ public class CallRunner {
     this.rpcServer = null;
   }
 
-  public void run() {
+  public void run(final List<Cell> cellPool) {
     try {
       if (call.disconnectSince() >= 0) {
         if (RpcServer.LOG.isDebugEnabled()) {
@@ -127,7 +129,7 @@ public class CallRunner {
         String traceString = serviceName + "." + methodName;
         TraceUtil.createTrace(traceString);
         // make the call
-        resultPair = this.rpcServer.call(call, this.status);
+        resultPair = this.rpcServer.call(call, this.status, cellPool);
       } catch (TimeoutIOException e){
         RpcServer.LOG.warn("Can not complete this request in time, drop it: " + call);
         return;

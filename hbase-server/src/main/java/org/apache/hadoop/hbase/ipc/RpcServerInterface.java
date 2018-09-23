@@ -21,8 +21,10 @@ package org.apache.hadoop.hbase.ipc;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.List;
 
 import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 import org.apache.hadoop.hbase.regionserver.RSRpcServices;
@@ -61,8 +63,10 @@ public interface RpcServerInterface {
       CellScanner cellScanner, long receiveTime, MonitoredRPCHandler status, long startTime,
       int timeout) throws IOException;
 
-  Pair<Message, CellScanner> call(RpcCall call, MonitoredRPCHandler status)
-      throws IOException;
+  Pair<Message, CellScanner> call(RpcCall call, MonitoredRPCHandler status) throws IOException;
+
+  Pair<Message, CellScanner> call(RpcCall call, MonitoredRPCHandler status,
+      final List<Cell> cellPool) throws IOException;
 
   void setErrorHandler(HBaseRPCErrorHandler handler);
   HBaseRPCErrorHandler getErrorHandler();

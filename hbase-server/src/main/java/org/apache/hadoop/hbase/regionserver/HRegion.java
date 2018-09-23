@@ -75,6 +75,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ipc.RpcCallContext;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellBuilderType;
 import org.apache.hadoop.hbase.CellComparator;
@@ -6152,6 +6153,13 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     private final long maxResultSize;
     private final ScannerContext defaultScannerContext;
     private final FilterWrapper filter;
+    private List<Cell> cellPool;
+    private int curCellPoolIndex;
+
+    public void setCellPool(List<Cell> cellPool) {
+      this.cellPool = cellPool;
+      this.defaultScannerContext.setCellPool(cellPool);
+    }
 
     @Override
     public RegionInfo getRegionInfo() {
@@ -6546,6 +6554,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
               return scannerContext.setScannerState(NextState.NO_MORE_VALUES).hasMoreValues();
             }
             results.clear();
+
+            // SHX: TODO, the reset logic is wrong, it should have remember the starting index
+            // before this call and reset to that index.
+            scannerContext.resetCellPool();
 
             // Read nothing as the rowkey was filtered, but still need to check time limit
             if (scannerContext.checkTimeLimit(limitScope)) {

@@ -150,7 +150,7 @@ public class TestFifoRpcScheduler {
         Thread.sleep(1000);
         return null;
       }
-    }).when(task).run();
+    }).when(task).run(null);
 
     return task;
   }

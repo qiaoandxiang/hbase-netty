@@ -87,7 +87,7 @@ public class FifoRpcScheduler extends RpcScheduler {
 
     @Override
     public void run() {
-      callRunner.run();
+      callRunner.run(null);
     }
 
   }
@@ -105,7 +105,7 @@ public class FifoRpcScheduler extends RpcScheduler {
       @Override
       public void run() {
         task.setStatus(RpcServer.getStatus());
-        task.run();
+        task.run(null);
         queueSize.decrementAndGet();
       }
     });

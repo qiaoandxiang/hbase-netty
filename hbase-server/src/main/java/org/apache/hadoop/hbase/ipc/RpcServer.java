@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CallQueueTooBigException;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HConstants;
@@ -399,6 +400,12 @@ public abstract class RpcServer implements RpcServerInterface,
   @Override
   public Pair<Message, CellScanner> call(RpcCall call,
       MonitoredRPCHandler status) throws IOException {
+    return call(call, status, null);
+
+  }
+    @Override
+  public Pair<Message, CellScanner> call(RpcCall call,
+      MonitoredRPCHandler status, final List<Cell> cellPool) throws IOException {
     try {
       MethodDescriptor md = call.getMethod();
       Message param = call.getParam();
@@ -408,7 +415,7 @@ public abstract class RpcServer implements RpcServerInterface,
       status.setRPCPacket(param);
       status.resume("Servicing call");
       //get an instance of the method arg type
-      HBaseRpcController controller = new HBaseRpcControllerImpl(call.getCellScanner());
+      HBaseRpcController controller = new HBaseRpcControllerImpl(call.getCellScanner(), cellPool);
       controller.setCallTimeout(call.getTimeout());
       Message result = call.getService().callBlockingMethod(md, controller, param);
       long receiveTime = call.getReceiveTime();
